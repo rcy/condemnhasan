@@ -197,6 +197,7 @@ const pageStyle = `<style>
     font-family: system-ui, sans-serif;
     font-size: 0.8rem;
   }
+  footer { color: #666; }
   footer a { color: #71717a; text-decoration: none; }
   footer a:hover { color: #d4d4d8; text-decoration: underline; }
 </style>`
@@ -309,7 +310,10 @@ func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Write([]byte(`
   <p class="note">` + tally + `</p>
-  <footer><a href="https://github.com/rcy/condemnhasan">github.com/rcy/condemnhasan</a></footer>`))
+  <footer>
+<a href="https://github.com/rcy/condemnhasan">github</a> |
+<a href="https://www.reddit.com/r/Hasan_Piker/comments/1w80fhe/do_you_condemn_hasan_piker/">reddit</a>
+</footer>`))
 	}
 
 	w.Write([]byte(`
