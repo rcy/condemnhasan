@@ -1,0 +1,6 @@
+# flyctl launch added from .crush/.gitignore
+.crush/**/*
+
+# flyctl launch added from .gitignore
+**/results.txt
+fly.toml

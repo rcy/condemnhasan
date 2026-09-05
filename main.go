@@ -30,6 +30,9 @@ const voterCookie = "voter_id"
 
 func main() {
 	s := &server{startedAt: time.Now()}
+	if v := os.Getenv("RESULTS_PATH"); v != "" {
+		s.votesFile = v
+	}
 
 	r := s.routes()
 
