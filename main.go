@@ -292,6 +292,7 @@ func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Do you condemn Hasan Piker?</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2064%2064'%3E%3Crect%20width='64'%20height='64'%20rx='14'%20fill='%230f0f13'/%3E%3Ctext%20x='32'%20y='46'%20font-family='Georgia,serif'%20font-size='40'%20fill='%23f4f4f5'%20text-anchor='middle'%3EH%3C/text%3E%3C/svg%3E">
 ` + pageStyle + `
 </head>
 <body>
