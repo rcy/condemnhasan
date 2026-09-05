@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -54,7 +53,7 @@ func (s *server) routes() http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
-	r.Use(middleware.ClientIPFromHeader("CF-Connecting-IP"))
+	r.Use(middleware.RealIP)
 	r.Use(s.ensureVoterID)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -94,28 +93,6 @@ func voterIDFrom(r *http.Request) string {
 	return id
 }
 
-// clientIP returns the visitor's IP: the CF-Connecting-IP header that
-// Cloudflare sets (stored in the request context by ClientIPFromHeader),
-// falling back to the raw connection address for direct connections. It
-// never trusts client-supplied X-Forwarded-For values the way the
-// deprecated RealIP middleware did.
-func clientIP(r *http.Request) string {
-	if ip := middleware.GetClientIP(r.Context()); ip != "" {
-		return ip
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		if r.RemoteAddr != "" {
-			return r.RemoteAddr
-		}
-		return "-"
-	}
-	if host == "" {
-		return "-"
-	}
-	return host
-}
-
 func (s *server) votesPath() string {
 	if s.votesFile != "" {
 		return s.votesFile
@@ -138,7 +115,7 @@ func (s *server) voteFor(id string) (int, bool) {
 	}
 	for _, line := range strings.Split(string(b), "\n") {
 		fields := strings.Split(line, "\t")
-		if len(fields) >= 3 && fields[1] == id {
+		if len(fields) == 3 && fields[1] == id {
 			choice, err := strconv.Atoi(fields[2])
 			if err != nil {
 				return 0, false
@@ -151,15 +128,14 @@ func (s *server) voteFor(id string) (int, bool) {
 
 // castVote appends id's vote unless id already has one. It reports whether a
 // new vote was recorded so callers can tell first votes from repeat attempts.
-// Lines written before IP recording (three columns) are still recognized.
-func (s *server) castVote(id string, vote int, ip string) (recorded bool, err error) {
+func (s *server) castVote(id string, vote int) (recorded bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if b, rerr := os.ReadFile(s.votesPath()); rerr == nil {
 		for _, line := range strings.Split(string(b), "\n") {
 			fields := strings.Split(line, "\t")
-			if len(fields) >= 3 && fields[1] == id {
+			if len(fields) == 3 && fields[1] == id {
 				return false, nil
 			}
 		}
@@ -172,7 +148,7 @@ func (s *server) castVote(id string, vote int, ip string) (recorded bool, err er
 	defer f.Close()
 
 	ts := time.Now().UTC().Format(time.RFC3339)
-	if _, err := fmt.Fprintf(f, "%s\t%s\t%d\t%s\n", ts, id, vote, ip); err != nil {
+	if _, err := fmt.Fprintf(f, "%s\t%s\t%d\n", ts, id, vote); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -237,7 +213,7 @@ func (s *server) voteCounts() (yes, no int) {
 	}
 	for _, line := range strings.Split(string(b), "\n") {
 		fields := strings.Split(line, "\t")
-		if len(fields) < 3 {
+		if len(fields) != 3 {
 			continue
 		}
 		switch fields[2] {
@@ -369,7 +345,7 @@ func (s *server) handleVote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	recorded, err := s.castVote(id, vote, clientIP(r))
+	recorded, err := s.castVote(id, vote)
 	if err != nil {
 		log.Printf("record vote: %v", err)
 		http.Error(w, "could not record vote", http.StatusInternalServerError)
