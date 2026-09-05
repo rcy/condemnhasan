@@ -189,6 +189,16 @@ const pageStyle = `<style>
   .yes { background: #15803d; color: #fff; border-color: #22c55e; }
   .no  { background: #b91c1c; color: #fff; border-color: #ef4444; }
   .note { color: #a1a1aa; font-family: system-ui, sans-serif; font-size: 1.1rem; }
+  footer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0.75rem;
+    font-family: system-ui, sans-serif;
+    font-size: 0.8rem;
+  }
+  footer a { color: #71717a; text-decoration: none; }
+  footer a:hover { color: #d4d4d8; text-decoration: underline; }
 </style>`
 
 // voteCounts returns how many recorded votes chose yes (1) and no (0).
@@ -297,7 +307,8 @@ func (s *server) handleHome(w http.ResponseWriter, r *http.Request) {
   </form>`))
 	} else {
 		w.Write([]byte(`
-  <p class="note">` + tally + `</p>`))
+  <p class="note">` + tally + `</p>
+  <footer><a href="https://github.com/rcy/condemnhasan">github.com/rcy/condemnhasan</a></footer>`))
 	}
 
 	w.Write([]byte(`
