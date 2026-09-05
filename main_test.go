@@ -140,14 +140,14 @@ func TestVoteRecordsAndRedirects(t *testing.T) {
 		t.Fatalf("results has %d lines, want 1", len(lines))
 	}
 	fields := strings.Split(lines[0], "\t")
-	if len(fields) != 3 {
-		t.Fatalf("line fields = %v, want timestamp\tuuid\tchoice", fields)
+	if len(fields) != 4 {
+		t.Fatalf("line fields = %v, want timestamp\tuuid\tchoice\tip", fields)
 	}
 	if _, err := time.Parse(time.RFC3339, fields[0]); err != nil {
 		t.Fatalf("timestamp %q not RFC3339: %v", fields[0], err)
 	}
-	if fields[1] != id || fields[2] != "1" {
-		t.Fatalf("line = %q, want id %q choice 1", lines[0], id)
+	if fields[1] != id || fields[2] != "1" || fields[3] != "192.0.2.1" {
+		t.Fatalf("line = %q, want id %q choice 1 ip 192.0.2.1", lines[0], id)
 	}
 }
 
@@ -182,11 +182,11 @@ func TestTallySentence(t *testing.T) {
 		myChoice, withYou, others int
 		want                      string
 	}{
-		{1, 3, 2, "3 people stand with you in condemning Hasan Piker, while 2 do not."},
-		{0, 4, 1, "4 people stand with you in not condemning Hasan Piker, while 1 condemns him."},
-		{1, 1, 1, "1 person stands with you in condemning Hasan Piker, while 1 does not."},
-		{0, 2, 3, "2 people stand with you in not condemning Hasan Piker, while 3 condemn him."},
-		{0, 1, 1, "1 person stands with you in not condemning Hasan Piker, while 1 condemns him."},
+		{1, 3, 2, "3 people stand with you in condemning Hasan, while 2 do not."},
+		{0, 4, 1, "4 people stand with you in not condemning Hasan, while 1 condemns him."},
+		{1, 1, 1, "1 person stands with you in condemning Hasan, while 1 does not."},
+		{0, 2, 3, "2 people stand with you in not condemning Hasan, while 3 condemn him."},
+		{0, 1, 1, "1 person stands with you in not condemning Hasan, while 1 condemns him."},
 	}
 	for _, c := range cases {
 		if got := standWithSentence(c.myChoice, c.withYou, c.others); got != c.want {
@@ -206,12 +206,12 @@ func TestTallyCountsReflectFile(t *testing.T) {
 	postVote(t, s.routes(), "voter-d", "no")
 
 	body := getHome(t, s.routes(), id).Body.String()
-	if want := "3 people stand with you in condemning Hasan Piker, while 1 does not."; !strings.Contains(body, want) {
+	if want := "3 people stand with you in condemning Hasan, while 1 does not."; !strings.Contains(body, want) {
 		t.Fatalf("yes-voter tally missing %q in:\n%s", want, body)
 	}
 
 	body = getHome(t, s.routes(), "voter-d").Body.String()
-	if want := "1 person stands with you in not condemning Hasan Piker, while 3 condemn him."; !strings.Contains(body, want) {
+	if want := "1 person stands with you in not condemning Hasan, while 3 condemn him."; !strings.Contains(body, want) {
 		t.Fatalf("no-voter tally missing %q in:\n%s", want, body)
 	}
 }
@@ -223,7 +223,8 @@ func TestCannotVoteTwiceOrChangeVote(t *testing.T) {
 	postVote(t, s.routes(), id, "no")
 
 	lines := strings.Split(strings.TrimSpace(readResults(t, s)), "\n")
-	if len(lines) != 1 || !strings.HasSuffix(lines[0], "\t"+id+"\t1") {
+	fields := strings.Split(lines[0], "\t")
+	if len(lines) != 1 || len(fields) != 4 || fields[1] != id || fields[2] != "1" {
 		t.Fatalf("results = %q, want one immutable yes vote for %s", readResults(t, s), id)
 	}
 
@@ -261,7 +262,94 @@ func TestVoteWithoutCookieStillRecords(t *testing.T) {
 		t.Fatalf("expected %q cookie to be set", voterCookie)
 	}
 
-	if got := readResults(t, s); !strings.HasSuffix(strings.TrimSpace(got), "\t1") {
+	got := strings.TrimSpace(readResults(t, s))
+	lines := strings.Split(got, "\n")
+	fields := strings.Split(lines[0], "\t")
+	if len(lines) != 1 || len(fields) != 4 || fields[2] != "1" {
 		t.Fatalf("results = %q, want a single yes vote", got)
+	}
+}
+
+func TestLegacyThreeColumnLinesStillWork(t *testing.T) {
+	s, _ := newVoteServer(t)
+	legacy := "2026-01-01T00:00:00Z\tlegacy-a\t1\n2026-01-01T00:00:01Z\tlegacy-b\t0\n"
+	if err := os.WriteFile(s.votesFile, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("seed results: %v", err)
+	}
+
+	// old three-column rows are still recognized and counted
+	if choice, ok := s.voteFor("legacy-a"); !ok || choice != 1 {
+		t.Fatalf("legacy yes voter not recognized: choice=%d ok=%v", choice, ok)
+	}
+	if yes, no := s.voteCounts(); yes != 1 || no != 1 {
+		t.Fatalf("voteCounts = %d/%d, want 1/1", yes, no)
+	}
+
+	// legacy voters still cannot vote again
+	req := httptest.NewRequest(http.MethodPost, "/vote", strings.NewReader("answer=yes"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: voterCookie, Value: "legacy-a"})
+	w := httptest.NewRecorder()
+	s.routes().ServeHTTP(w, req)
+	if got := readResults(t, s); got != legacy {
+		t.Fatalf("legacy voter vote changed file:\n%q", got)
+	}
+
+	// a new vote appends a four-column row with the Cloudflare IP
+	req = httptest.NewRequest(http.MethodPost, "/vote", strings.NewReader("answer=yes"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("CF-Connecting-IP", "203.0.113.9")
+	w = httptest.NewRecorder()
+	s.routes().ServeHTTP(w, req)
+
+	rows := strings.Split(strings.TrimSpace(readResults(t, s)), "\n")
+	if len(rows) != 3 {
+		t.Fatalf("results has %d lines, want 3", len(rows))
+	}
+	newFields := strings.Split(rows[2], "\t")
+	if len(newFields) != 4 || newFields[2] != "1" || newFields[3] != "203.0.113.9" {
+		t.Fatalf("new row = %q, want choice 1 with ip 203.0.113.9", rows[2])
+	}
+}
+
+func lastColumn(t *testing.T, s *server) string {
+	t.Helper()
+	rows := strings.Split(strings.TrimSpace(readResults(t, s)), "\n")
+	fields := strings.Split(rows[len(rows)-1], "\t")
+	if len(fields) != 4 {
+		t.Fatalf("row = %q, want 4 columns", rows[len(rows)-1])
+	}
+	return fields[3]
+}
+
+// TestClientIPIgnoresSpoofedForwardedFor records the real connection address,
+// not a client-supplied X-Forwarded-For value, when no Cloudflare header is
+// present (the deprecated RealIP middleware used to trust the leftmost XFF).
+func TestClientIPIgnoresSpoofedForwardedFor(t *testing.T) {
+	s, _ := newVoteServer(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/vote", strings.NewReader("answer=yes"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-Forwarded-For", "6.6.6.6")
+	w := httptest.NewRecorder()
+	s.routes().ServeHTTP(w, req)
+
+	if got := lastColumn(t, s); got != "192.0.2.1" {
+		t.Fatalf("recorded ip = %q, want 192.0.2.1 (spoofed X-Forwarded-For ignored)", got)
+	}
+}
+
+func TestClientIPPrefersCloudflareHeader(t *testing.T) {
+	s, _ := newVoteServer(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/vote", strings.NewReader("answer=no"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-Forwarded-For", "6.6.6.6")
+	req.Header.Set("CF-Connecting-IP", "198.51.100.42")
+	w := httptest.NewRecorder()
+	s.routes().ServeHTTP(w, req)
+
+	if got := lastColumn(t, s); got != "198.51.100.42" {
+		t.Fatalf("recorded ip = %q, want 198.51.100.42 from CF-Connecting-IP", got)
 	}
 }
